@@ -14,23 +14,25 @@ type (
 	EventLoop struct {
 		events map[int]*Event
 		stop   bool
-		Poll   Poll
+		poll   Poll
 	}
 
 	Event struct {
-		fd   int
-		mask int
-		Proc Proc
-		Data interface{}
+		fd        int
+		mask      int
+		readProc  Proc
+		writeProc Proc
+		data      *Connection
 	}
 
-	Proc func(eventLoop *EventLoop, fd int, data interface{}, mask int) error
+	Proc func(eventLoop *EventLoop, event *Event) error
 
 	Poll interface {
-		Create()
-		Add(e *Event)
-		Delete()
-		Poll(iter func(fd int) error) error
+		create()
+		add(fd int) error
+		mod(fd int, flag uint32) error
+		delete(fd int) error
+		poll(iter func(fd int) error) error
 	}
 )
 
@@ -40,24 +42,28 @@ func NewEventLoop() *EventLoop {
 		stop:   false,
 	}
 	eventLoop.system()
-	eventLoop.Poll.Create()
+	eventLoop.poll.create()
 	return eventLoop
 }
 
-func (eventLoop *EventLoop) NewEvent(fd int, mask int, proc Proc, data interface{}) *Event {
+func (eventLoop *EventLoop) NewEvent(fd int, proc Proc, data *Connection) (*Event, error) {
 	e := &Event{
-		fd:   fd,
-		mask: mask,
-		Data: data,
-		Proc: proc,
+		fd:        fd,
+		mask:      READABLE,
+		readProc:  proc,
+		writeProc: Write,
+		data:      data,
 	}
-	eventLoop.Poll.Add(e)
+
+	if err := eventLoop.poll.add(fd); err != nil {
+		return nil, err
+	}
 	eventLoop.events[fd] = e
-	return e
+	return e, nil
 }
 
 func (eventLoop *EventLoop) system() {
-	eventLoop.Poll = &Epoll{
+	eventLoop.poll = &Epoll{
 		events: make([]syscall.EpollEvent, 64),
 	}
 }
@@ -69,12 +75,22 @@ func (eventLoop *EventLoop) Process() {
 }
 
 func (eventLoop *EventLoop) process() {
-	if err := eventLoop.Poll.Poll(func(fd int) error {
+	if err := eventLoop.poll.poll(func(fd int) error {
 		e := eventLoop.events[fd]
 
-		// 判断当前mask
+		if e.mask&READABLE != 0 {
+			if err := e.readProc(eventLoop, e); err != nil {
+				return err
+			}
+		}
 
-		return e.Proc(eventLoop, e.fd, e.Data, e.mask)
+		if e.mask&WRITABLE != 0 {
+			if err := e.writeProc(eventLoop, e); err != nil {
+				return err
+			}
+		}
+
+		return nil
 	}); err != nil {
 		eventLoop.stop = true
 	}

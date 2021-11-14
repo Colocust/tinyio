@@ -20,7 +20,7 @@ func main() {
 	f, _ := netLn.File()
 	fd := int(f.Fd())
 
-	eventLoop.NewEvent(fd, internal.WRITABLE, internal.Accept, "s")
+	_, _ = eventLoop.NewEvent(fd, internal.Accept, nil)
 
 	eventLoop.Process()
 }
