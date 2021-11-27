@@ -1,6 +1,7 @@
 package app
 
 import (
+	"log"
 	"net"
 	"syscall"
 	"tinyio/internal"
@@ -11,30 +12,28 @@ type Connection struct {
 	in, out []byte
 }
 
-func accept(eventLoop *eventLoop, event *event) error {
+func accept(eventLoop *eventLoop, event *event) {
 	nfd, sa, err := syscall.Accept(event.fd)
 	if err != nil {
 		if err == syscall.EAGAIN {
-			return nil
+			return
 		}
-		return err
+		log.Println("ERR:Accept Err " + err.Error())
+		return
 	}
-
-	conn := &Connection{
-		addr: internal.SocketAddrToNetAddr(sa),
-	}
-
 	if err = syscall.SetNonblock(nfd, true); err != nil {
-		return err
+		return
 	}
-
-	if err = eventLoop.newEvent(nfd, read, conn); err != nil {
-		return err
+	if err = eventLoop.newEvent(nfd, &Connection{
+		addr: internal.SocketAddrToNetAddr(sa),
+	}); err != nil {
+		log.Println("ERR:New Event Err " + err.Error())
+		return
 	}
-	return nil
+	return
 }
 
-func read(eventLoop *eventLoop, event *event) error {
+func read(eventLoop *eventLoop, event *event) {
 	var (
 		out []byte
 		n   int
@@ -44,21 +43,17 @@ func read(eventLoop *eventLoop, event *event) error {
 	n, err = syscall.Read(event.fd, in)
 	if n == 0 || err != nil {
 		if err == syscall.EAGAIN {
-			return nil
+			return
 		}
-		return close(eventLoop, event)
+		close(eventLoop, event)
 	}
-
-	if err = eventLoop.iter(event.data.in, out); err != nil {
-		return err
-	}
-	return nil
+	eventLoop.iter(in, out)
 }
 
-func write(eventLoop *eventLoop, event *event) error {
-	return nil
+func write(eventLoop *eventLoop, event *event) {
+
 }
 
-func close(eventLoop *eventLoop, event *event) error {
-	return nil
+func close(eventLoop *eventLoop, event *event) {
+
 }

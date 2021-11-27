@@ -1,6 +1,8 @@
 package app
 
 import (
+	"fmt"
+	"log"
 	"syscall"
 )
 
@@ -50,18 +52,17 @@ func (ep *Epoll) delete(fd int) (err error) {
 	return
 }
 
-func (ep *Epoll) poll(iter func(fd int) error) error {
+func (ep *Epoll) poll(iter func(fd int)) {
 	events := make([]syscall.EpollEvent, 64)
 	n, err := syscall.EpollWait(ep.epfd, events, 5000)
+
 	if err != nil && err != syscall.EINTR {
-		return err
+		log.Println(fmt.Println("ERR:Poll Err " + err.Error()))
+		return
 	}
 
 	for i := 0; i < n; i++ {
-		if err = iter(int(events[i].Fd)); err != nil {
-			return err
-		}
+		iter(int(events[i].Fd))
 	}
-
-	return nil
+	return
 }

@@ -6,8 +6,8 @@ import (
 )
 
 func main() {
-	app.Boot("127.0.0.1:8877", func(in, out []byte) error {
+	app.Boot("127.0.0.1:8877", func(in, out []byte) {
 		fmt.Println(in)
-		return nil
+		return
 	})
 }

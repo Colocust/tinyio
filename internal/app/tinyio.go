@@ -15,25 +15,22 @@ const (
 type (
 	eventLoop struct {
 		events map[int]*event
-		stop   bool
 		poll   *Epoll
-		iter   func(in, out []byte) error
+		iter   func(in, out []byte)
+		lnFd   int
 	}
 
 	event struct {
 		fd   int
 		mask int
-		proc Proc
 		data *Connection
 	}
-
-	Proc func(eventLoop *eventLoop, event *event) error
 )
 
-func newEventLoop(iter func(in, out []byte) error) *eventLoop {
+func newEventLoop(lnFd int, iter func(in, out []byte)) *eventLoop {
 	el := &eventLoop{
+		lnFd:   lnFd,
 		events: make(map[int]*event),
-		stop:   false,
 		iter:   iter,
 		poll: &Epoll{
 			events: make([]syscall.EpollEvent, 64),
@@ -43,11 +40,10 @@ func newEventLoop(iter func(in, out []byte) error) *eventLoop {
 	return el
 }
 
-func (eventLoop *eventLoop) newEvent(fd int, proc Proc, data *Connection) error {
+func (eventLoop *eventLoop) newEvent(fd int, data *Connection) error {
 	e := &event{
 		fd:   fd,
 		mask: READABLE,
-		proc: proc,
 		data: data,
 	}
 
@@ -59,36 +55,28 @@ func (eventLoop *eventLoop) newEvent(fd int, proc Proc, data *Connection) error 
 }
 
 func (eventLoop *eventLoop) process() {
-	for !eventLoop.stop {
-		if err := eventLoop.poll.poll(func(fd int) error {
+	for  {
+		eventLoop.poll.poll(func(fd int) {
 			e := eventLoop.events[fd]
-
-			if e.mask&READABLE != 0 {
-				if err := e.proc(eventLoop, e); err != nil {
-					return err
-				}
+			switch {
+			case e.fd == eventLoop.lnFd:
+				accept(eventLoop, e)
+			case e.mask&WRITABLE != 0:
+				write(eventLoop, e)
+			default:
+				read(eventLoop, e)
 			}
-
-			if e.mask&WRITABLE != 0 {
-				if err := write(eventLoop, e); err != nil {
-					return err
-				}
-			}
-
-			return nil
-		}); err != nil {
-			eventLoop.stop = true
-		}
+		})
 	}
 }
 
-func Boot(addr string, iter func(in, out []byte) error) {
+func Boot(addr string, iter func(in, out []byte)) {
 	if err := boot(addr, iter); err != nil {
 		panic(err)
 	}
 }
 
-func boot(addr string, iter func(in, out []byte) error) (err error) {
+func boot(addr string, iter func(in, out []byte)) (err error) {
 	var (
 		ln net.Listener
 		fd int
@@ -109,8 +97,8 @@ func boot(addr string, iter func(in, out []byte) error) (err error) {
 		return
 	}
 
-	el := newEventLoop(iter)
-	if err = el.newEvent(fd, accept, nil); err != nil {
+	el := newEventLoop(fd, iter)
+	if err = el.newEvent(fd, nil); err != nil {
 		return
 	}
 
