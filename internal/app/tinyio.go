@@ -1,7 +1,8 @@
-package internal
+package app
 
 import (
 	"net"
+	"os"
 	"syscall"
 )
 
@@ -13,60 +14,48 @@ const (
 
 type (
 	eventLoop struct {
-		events map[int]*Event
+		events map[int]*event
 		stop   bool
-		poll   Poll
+		poll   *Epoll
+		iter   func(in, out []byte) error
 	}
 
-	Event struct {
-		fd        int
-		mask      int
-		readProc  Proc
-		writeProc Proc
-		data      *Connection
+	event struct {
+		fd   int
+		mask int
+		proc Proc
+		data *Connection
 	}
 
-	Proc func(eventLoop *eventLoop, event *Event) error
-
-	Poll interface {
-		create()
-		add(fd int) error
-		mod(fd int, flag uint32) error
-		delete(fd int) error
-		poll(iter func(fd int) error) error
-	}
+	Proc func(eventLoop *eventLoop, event *event) error
 )
 
-func newEventLoop() *eventLoop {
-	eventLoop := &eventLoop{
-		events: make(map[int]*Event),
+func newEventLoop(iter func(in, out []byte) error) *eventLoop {
+	el := &eventLoop{
+		events: make(map[int]*event),
 		stop:   false,
+		iter:   iter,
+		poll: &Epoll{
+			events: make([]syscall.EpollEvent, 64),
+		},
 	}
-	eventLoop.system()
-	eventLoop.poll.create()
-	return eventLoop
+	el.poll.create()
+	return el
 }
 
-func (eventLoop *eventLoop) NewEvent(fd int, proc Proc, data *Connection) (*Event, error) {
-	e := &Event{
-		fd:        fd,
-		mask:      READABLE,
-		readProc:  proc,
-		writeProc: Write,
-		data:      data,
+func (eventLoop *eventLoop) newEvent(fd int, proc Proc, data *Connection) error {
+	e := &event{
+		fd:   fd,
+		mask: READABLE,
+		proc: proc,
+		data: data,
 	}
 
 	if err := eventLoop.poll.add(fd); err != nil {
-		return nil, err
+		return err
 	}
 	eventLoop.events[fd] = e
-	return e, nil
-}
-
-func (eventLoop *eventLoop) system() {
-	eventLoop.poll = &Epoll{
-		events: make([]syscall.EpollEvent, 64),
-	}
+	return nil
 }
 
 func (eventLoop *eventLoop) process() {
@@ -75,13 +64,13 @@ func (eventLoop *eventLoop) process() {
 			e := eventLoop.events[fd]
 
 			if e.mask&READABLE != 0 {
-				if err := e.readProc(eventLoop, e); err != nil {
+				if err := e.proc(eventLoop, e); err != nil {
 					return err
 				}
 			}
 
 			if e.mask&WRITABLE != 0 {
-				if err := e.writeProc(eventLoop, e); err != nil {
+				if err := write(eventLoop, e); err != nil {
 					return err
 				}
 			}
@@ -93,29 +82,38 @@ func (eventLoop *eventLoop) process() {
 	}
 }
 
-func Serve(addr string) error {
+func Boot(addr string, iter func(in, out []byte) error) {
+	if err := boot(addr, iter); err != nil {
+		panic(err)
+	}
+}
+
+func boot(addr string, iter func(in, out []byte) error) (err error) {
 	var (
-		ln  net.Listener
-		err error
+		ln net.Listener
+		fd int
+		f  *os.File
 	)
 	if ln, err = net.Listen("tcp", addr); err != nil {
-		return err
+		return
 	}
+	defer ln.Close()
 
-	netLn, _ := ln.(*net.TCPListener)
-	f, _ := netLn.File()
-	fd := int(f.Fd())
+	netLn := ln.(*net.TCPListener)
+	if f, err = netLn.File(); err != nil {
+		return
+	}
+	fd = int(f.Fd())
 
 	if err = syscall.SetNonblock(fd, true); err != nil {
-		return err
+		return
 	}
 
-	eventLoop := newEventLoop()
-
-	if _, err = eventLoop.NewEvent(fd, Accept, nil); err != nil {
-		return err
+	el := newEventLoop(iter)
+	if err = el.newEvent(fd, accept, nil); err != nil {
+		return
 	}
 
-	eventLoop.process()
-	return nil
+	el.process()
+	return
 }

@@ -1,9 +1,13 @@
 package main
 
 import (
-	"tinyio/internal"
+	"fmt"
+	"tinyio/internal/app"
 )
 
 func main() {
-	internal.Serve("127.0.0.1:8877")
+	app.Boot("127.0.0.1:8877", func(in, out []byte) error {
+		fmt.Println(in)
+		return nil
+	})
 }
