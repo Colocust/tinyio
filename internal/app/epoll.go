@@ -30,10 +30,21 @@ func (ep *Epoll) add(fd int) (err error) {
 	return
 }
 
-func (ep *Epoll) mod(fd int, flag uint32) (err error) {
+func (ep *Epoll) modReadWrite(fd int) (err error) {
 	if err = syscall.EpollCtl(ep.epfd, syscall.EPOLL_CTL_MOD, fd,
 		&syscall.EpollEvent{Fd: int32(fd),
-			Events: flag,
+			Events: syscall.EPOLLIN | syscall.EPOLLOUT,
+		},
+	); err != nil {
+		return
+	}
+	return
+}
+
+func (ep *Epoll) modRead(fd int) (err error) {
+	if err = syscall.EpollCtl(ep.epfd, syscall.EPOLL_CTL_MOD, fd,
+		&syscall.EpollEvent{Fd: int32(fd),
+			Events: syscall.EPOLLIN,
 		},
 	); err != nil {
 		return

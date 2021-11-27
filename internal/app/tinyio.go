@@ -1,33 +1,27 @@
 package app
 
 import (
+	"log"
 	"net"
 	"os"
 	"syscall"
-)
-
-const (
-	NONE = iota
-	READABLE
-	WRITABLE
 )
 
 type (
 	eventLoop struct {
 		events map[int]*event
 		poll   *Epoll
-		iter   func(in, out []byte)
+		iter   func(in []byte) (out []byte)
 		lnFd   int
 	}
 
 	event struct {
 		fd   int
-		mask int
 		data *Connection
 	}
 )
 
-func newEventLoop(lnFd int, iter func(in, out []byte)) *eventLoop {
+func newEventLoop(lnFd int, iter func(in []byte) (out []byte)) *eventLoop {
 	el := &eventLoop{
 		lnFd:   lnFd,
 		events: make(map[int]*event),
@@ -43,7 +37,6 @@ func newEventLoop(lnFd int, iter func(in, out []byte)) *eventLoop {
 func (eventLoop *eventLoop) newEvent(fd int, data *Connection) error {
 	e := &event{
 		fd:   fd,
-		mask: READABLE,
 		data: data,
 	}
 
@@ -55,28 +48,31 @@ func (eventLoop *eventLoop) newEvent(fd int, data *Connection) error {
 }
 
 func (eventLoop *eventLoop) process() {
-	for  {
+	for {
 		eventLoop.poll.poll(func(fd int) {
 			e := eventLoop.events[fd]
 			switch {
 			case e.fd == eventLoop.lnFd:
 				accept(eventLoop, e)
-			case e.mask&WRITABLE != 0:
+				break
+			case len(e.data.out) > 0:
 				write(eventLoop, e)
+				break
 			default:
 				read(eventLoop, e)
+				break
 			}
 		})
 	}
 }
 
-func Boot(addr string, iter func(in, out []byte)) {
+func Boot(addr string, iter func(in []byte) (out []byte)) {
 	if err := boot(addr, iter); err != nil {
 		panic(err)
 	}
 }
 
-func boot(addr string, iter func(in, out []byte)) (err error) {
+func boot(addr string, iter func(in []byte) (out []byte)) (err error) {
 	var (
 		ln net.Listener
 		fd int
@@ -102,6 +98,7 @@ func boot(addr string, iter func(in, out []byte)) (err error) {
 		return
 	}
 
+	log.Println("INFO：tiny io boot")
 	el.process()
 	return
 }
