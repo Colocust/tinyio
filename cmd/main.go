@@ -1,7 +1,7 @@
 package main
 
 import (
-	"tinyio/app"
+	"github.com/Colocust/tinyio/app"
 )
 
 func main() {
