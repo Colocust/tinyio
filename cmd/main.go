@@ -1,7 +1,7 @@
 package main
 
 import (
-	"tinyio/internal/app"
+	"tinyio/app"
 )
 
 func main() {
