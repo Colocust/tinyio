@@ -105,6 +105,7 @@ func (e *event) write(el *eventLoop) {
 
 func (e *event) close(el *eventLoop) {
 	delete(el.events, e.fd)
+	el.poll.delete(e.fd)
 	syscall.Close(e.fd)
 }
 
